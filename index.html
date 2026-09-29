@@ -1,0 +1,1731 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧兒童聯絡簿與課表系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Pinyin-Pro JS Library for Automatic Phonetic Conversion -->
+    <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.19.6/dist/index.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts for Traditional & Calligraphic Style -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Google Identity Services API for Direct Google Drive Sync -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <style>
+        body {
+            font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #f8fafc;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Vertical Writing Mode Styling for Traditional Chinese Layout */
+        .writing-vertical-rl {
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+        }
+        .writing-vertical-lr {
+            writing-mode: vertical-lr;
+            text-orientation: upright;
+        }
+
+        /* Tate-chu-yoko (縱橫數字 / 橫組數字) */
+        .tate-chu-yoko {
+            -webkit-text-combine: horizontal;
+            -webkit-text-combine: all;
+            text-combine-upright: all;
+            display: inline-block;
+            letter-spacing: 0 !important;
+            margin: 1px 0;
+            vertical-align: middle;
+        }
+
+        /* Ruby Zhuyin Alignment for Vertical Text */
+        ruby {
+            ruby-position: over;
+            ruby-align: center;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        rt {
+            font-size: 0.45em;
+            font-weight: 500;
+            color: #475569;
+            letter-spacing: 0px;
+            user-select: none;
+        }
+
+        /* Themes */
+        .theme-grid {
+            background-color: #fcfbf7;
+            background-image: 
+                linear-gradient(to right, rgba(22, 101, 52, 0.12) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(22, 101, 52, 0.08) 1px, transparent 1px);
+            background-size: 40px 40px;
+            border: 2px solid #166534;
+            color: #14532d;
+            font-family: 'Noto Serif TC', 'DFKai-SB', '標楷體', serif;
+        }
+        .theme-blackboard {
+            background-color: #1e3a29;
+            color: #f1f5f9;
+            border: 8px solid #78350f;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+            font-family: 'Noto Serif TC', 'DFKai-SB', '標楷體', serif;
+        }
+        .theme-blackboard rt {
+            color: #cbd5e1;
+        }
+        .theme-white {
+            background-color: #ffffff;
+            color: #0f172a;
+            border: 2px solid #cbd5e1;
+        }
+
+        /* Print Optimization */
+        @media print {
+            header, nav, .no-print {
+                display: none !important;
+            }
+            body {
+                background: white !important;
+            }
+            .print-area {
+                border: 1px solid #000 !important;
+                background: white !important;
+                color: black !important;
+                box-shadow: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+<div id="app" class="max-w-6xl mx-auto p-3 sm:p-6 min-h-screen flex flex-col">
+    <!-- Header Navbar -->
+    <header class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-5 no-print">
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl shadow-md shadow-indigo-200">
+                    <i class="fa-solid fa-book-open-reader"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-800">小學智慧聯絡簿與課表</h1>
+                    <p class="text-xs text-slate-500 flex items-center gap-2">
+                        <span><i class="fa-solid fa-calendar-day text-indigo-500"></i> {{ formattedToday }}</span>
+                        <span v-if="gdriveConnected" class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[10px] font-medium flex items-center gap-1">
+                            <i class="fa-brands fa-google-drive text-emerald-600"></i> 已連線 Google 雲端 (最後同步: {{ lastSyncTime || '剛剛' }})
+                        </span>
+                        <span v-else class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-medium flex items-center gap-1">
+                            <i class="fa-solid fa-hard-drive text-amber-600"></i> 本地儲存模式
+                        </span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Quick Date Controls -->
+            <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <input type="date" v-model="selectedDate" @change="onDateChange" 
+                       class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50">
+                <button @click="goToToday" class="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium transition">
+                    今天
+                </button>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex border-t border-slate-100 mt-4 pt-3 gap-2 overflow-x-auto hide-scrollbar">
+            <button @click="currentTab = 'daily'" 
+                    :class="currentTab === 'daily' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-clipboard-list"></i> 今日聯絡簿
+            </button>
+            <button @click="currentTab = 'weekly'" 
+                    :class="currentTab === 'weekly' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-calendar-week"></i> 本週功課
+            </button>
+            <button @click="currentTab = 'copy'" 
+                    :class="currentTab === 'copy' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-emerald-50 text-emerald-700 font-semibold'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition bg-emerald-50/60 border border-emerald-200">
+                <i class="fa-solid fa-pen-ruler text-emerald-600" :class="{ 'text-white': currentTab === 'copy' }"></i> 抄聯絡簿 (學生投影)
+            </button>
+            <button @click="currentTab = 'calendar'" 
+                    :class="currentTab === 'calendar' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-calendar-days"></i> 月曆與行事曆
+            </button>
+            <button @click="currentTab = 'timetable'" 
+                    :class="currentTab === 'timetable' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-table-cells"></i> 每週課表設定
+            </button>
+            <button @click="currentTab = 'backup'" 
+                    :class="currentTab === 'backup' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+                    class="px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 whitespace-nowrap transition">
+                <i class="fa-solid fa-hard-drive"></i> 雲端與備份
+            </button>
+        </nav>
+    </header>
+
+    <main class="flex-1">
+        
+        <!-- TAB 1: DAILY CONTACT BOOK -->
+        <div v-if="currentTab === 'daily'" class="space-y-5">
+            <!-- Top Alert Bar / Date Title -->
+            <div class="bg-indigo-900 text-white p-4 sm:p-5 rounded-2xl shadow-md flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <span class="text-xs text-indigo-200 uppercase font-semibold tracking-wider">正在檢視日期</span>
+                    <h2 class="text-2xl font-bold flex items-center gap-2 mt-0.5">
+                        {{ selectedDateDisplay }} 
+                        <span class="text-xs bg-indigo-700 px-3 py-1 rounded-full text-indigo-100 font-normal">
+                            {{ getDayOfWeekName(selectedDate) }}
+                        </span>
+                    </h2>
+                </div>
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <button @click="openAddHomeworkModal" class="flex-1 sm:flex-initial bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-plus"></i> 新增功課/事項
+                    </button>
+                    <button @click="copyLineFormat" class="flex-1 sm:flex-initial bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow transition flex items-center justify-center gap-1.5">
+                        <i class="fa-brands fa-line text-lg"></i> 複製 LINE 格式
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content Grid: Homework List & Schedule Sidebar -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                
+                <!-- Main Homework Section (Left 2 Columns) -->
+                <div class="lg:col-span-2 space-y-5">
+                    
+                    <!-- Progress Card -->
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-indigo-600"></i> 今日完成進度
+                            </span>
+                            <span class="font-mono font-bold text-indigo-600">
+                                {{ completedCount }} / {{ todayHomeworks.length }} 項 ({{ progressPercentage }}%)
+                            </span>
+                        </div>
+                        <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                            <div class="bg-gradient-to-r from-indigo-500 to-emerald-500 h-full transition-all duration-500 rounded-full"
+                                 :style="{ width: progressPercentage + '%' }"></div>
+                        </div>
+                    </div>
+
+                    <!-- Homework Items List -->
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                                <i class="fa-solid fa-pen-clip text-indigo-600"></i> 作業與聯絡事項
+                            </h3>
+                            <span class="text-xs text-slate-400">勾選方框可標記完成狀態</span>
+                        </div>
+
+                        <div v-if="todayHomeworks.length === 0" class="py-12 text-center text-slate-400 space-y-2">
+                            <i class="fa-solid fa-circle-check text-4xl text-slate-200"></i>
+                            <p class="text-sm">今日尚無登記作業或聯絡事項</p>
+                            <button @click="openAddHomeworkModal" class="text-xs text-indigo-600 hover:underline font-medium">
+                                + 點此新增第一筆功課
+                            </button>
+                        </div>
+
+                        <ul v-else class="space-y-2.5">
+                            <li v-for="(hw, idx) in todayHomeworks" :key="hw.id"
+                                :class="hw.completed ? 'bg-slate-50/80 border-slate-200 opacity-75' : 'bg-white border-slate-200 hover:border-indigo-300'"
+                                class="p-3.5 rounded-xl border transition flex items-center justify-between gap-3 group">
+                                
+                                <div class="flex items-center gap-3 flex-1 min-w-0">
+                                    <input type="checkbox" v-model="hw.completed" @change="saveData" class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+                                    <span :class="getCategoryBadgeClass(hw.category)" class="px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0">
+                                        {{ hw.category }}
+                                    </span>
+                                    <div class="flex-1 min-w-0">
+                                        <p :class="{ 'line-through text-slate-400': hw.completed }" class="text-sm font-medium text-slate-800 break-words">
+                                            {{ hw.title }}
+                                        </p>
+                                        <p v-if="hw.note" class="text-xs text-slate-400 mt-0.5 break-words">
+                                            <i class="fa-solid fa-circle-info mr-1 text-slate-300"></i>{{ hw.note }}
+                                        </p>
+                                    </div>
+                                </div>
+                                <button @click="deleteHomework(hw.id)" class="text-slate-300 hover:text-rose-500 p-1.5 transition rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100" title="刪除">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Daily Reminders / Items to Bring Box -->
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-box-open text-amber-500"></i> 攜帶物品與備忘叮嚀
+                        </h3>
+                        <textarea v-model="dailyNotes[selectedDate]" @input="saveData"
+                                  placeholder="例如：帶跳繩、餐盒、回條簽名..."
+                                  rows="2"
+                                  class="w-full border border-slate-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50/50 resize-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- Right Column (Timetable Sidebar) -->
+                <div class="space-y-5">
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-clock text-indigo-600"></i> 今日課表
+                            </h3>
+                            <button @click="currentTab = 'timetable'" class="text-xs text-indigo-600 hover:underline font-medium">
+                                編輯課表
+                            </button>
+                        </div>
+
+                        <div v-if="isWeekend(selectedDate)" class="py-6 text-center text-slate-400 text-xs">
+                            <i class="fa-solid fa-mug-hot text-2xl text-slate-300 mb-2 block"></i>
+                            週末假日（無課表）
+                        </div>
+
+                        <ul v-else class="space-y-2">
+                            <li v-for="(subj, pIdx) in todaySubjects" :key="pIdx"
+                                class="flex items-center justify-between p-2.5 rounded-xl text-xs bg-slate-50 border border-slate-100">
+                                <span class="text-slate-400 font-mono">第 {{ pIdx + 1 }} 節</span>
+                                <span class="font-semibold text-slate-700">{{ subj || '未定' }}</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 1.5: WEEKLY HOMEWORK OVERVIEW -->
+        <div v-if="currentTab === 'weekly'" class="space-y-5">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <!-- Header Control Bar -->
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5 border-b border-slate-100 pb-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-calendar-week text-indigo-600"></i> 本週功課總覽
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-1">
+                            {{ weeklyDateRangeText }} · 點擊日期卡片可直接開啟該日聯絡簿。
+                        </p>
+                    </div>
+
+                    <div class="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-end">
+                        <button @click="prevWeek" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition">
+                            <i class="fa-solid fa-chevron-left"></i> 上一週
+                        </button>
+                        <button @click="goToCurrentWeek" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-medium transition">
+                            本週
+                        </button>
+                        <button @click="nextWeek" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition">
+                            下一週 <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                        <button @click="triggerPrint" class="bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-1.5 rounded-xl text-xs font-medium transition shadow flex items-center gap-1.5">
+                            <i class="fa-solid fa-print"></i> 列印本週
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 7 Days Grid Display Cards -->
+                <div class="overflow-x-auto -mx-1 px-1 pb-2">
+                    <div class="grid grid-cols-7 gap-2 sm:gap-3 min-w-[750px] sm:min-w-full print-area">
+                        <div v-for="day in currentWeekDays" :key="day.dateStr"
+                             @click="selectDayAndGoDaily(day.dateStr)"
+                             :class="[
+                                 'p-2.5 sm:p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between min-h-[220px]',
+                                 day.dateStr === selectedDate ? 'border-emerald-500 ring-2 ring-emerald-400 bg-emerald-50/20 shadow-md' : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-slate-300 hover:shadow-sm',
+                                 day.isToday ? 'bg-amber-50/40 border-amber-300' : ''
+                             ]">
+                            <div>
+                                <!-- Card Header: Date & Day Name -->
+                                <div class="flex items-center justify-between border-b border-slate-200/80 pb-2 mb-2 sm:mb-3">
+                                    <span class="font-bold text-xs sm:text-base text-slate-800 font-mono">
+                                        {{ day.formattedMD }}
+                                    </span>
+                                    <span class="text-[10px] sm:text-xs text-slate-500 font-medium">
+                                        {{ day.dayName }}
+                                    </span>
+                                </div>
+
+                                <!-- Homework Items List -->
+                                <div v-if="getHomeworksForDate(day.dateStr).length === 0" class="text-slate-400 text-xs py-8 text-center">
+                                    無功課
+                                </div>
+                                <ul v-else class="space-y-1.5 sm:space-y-2 text-[11px] sm:text-xs">
+                                    <li v-for="hw in getHomeworksForDate(day.dateStr)" :key="hw.id" class="text-slate-700 leading-snug">
+                                        <span class="font-bold text-indigo-900">{{ hw.category }}</span>
+                                        <span> {{ hw.title }}</span>
+                                        <span v-if="hw.note" class="text-[10px] text-slate-400 block pl-1">({{ hw.note }})</span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <!-- Card Footer -->
+                            <div v-if="getHomeworksForDate(day.dateStr).length > 0" class="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                                <span>{{ getHomeworksForDate(day.dateStr).filter(h => h.completed).length }}/{{ getHomeworksForDate(day.dateStr).length }} 完成</span>
+                                <i class="fa-solid fa-arrow-right-long text-slate-300"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: COPY CONTACT BOOK (STUDENT CHALKBOARD PROJECTION VIEW) -->
+        <div v-if="currentTab === 'copy'" class="space-y-4">
+            
+            <!-- Controls Bar -->
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 no-print">
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-chalkboard text-emerald-600"></i> 聯絡簿通知單與抄寫投影
+                        </h2>
+                        <p class="text-xs text-slate-500">
+                            {{ formattedRocDate(selectedDate) }} · 適合教室投影或讓學生直接看螢幕抄寫
+                        </p>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button @click="toggleFullscreen" class="bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-1.5 rounded-xl text-xs font-medium transition shadow flex items-center gap-1.5">
+                            <i class="fa-solid fa-expand"></i> 全螢幕投影
+                        </button>
+                        <button @click="triggerPrint" class="bg-slate-700 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-xl text-xs font-medium transition shadow flex items-center gap-1.5">
+                            <i class="fa-solid fa-print"></i> 列印通知單
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Display Customization Sliders & Switches -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center gap-2">
+                        <span class="whitespace-nowrap font-medium text-slate-600">字體大小</span>
+                        <input type="range" min="18" max="52" v-model.number="copyFontSize" class="w-full accent-emerald-600">
+                        <span class="w-8 font-mono text-right text-slate-500">{{ copyFontSize }}px</span>
+                    </div>
+
+                    <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center gap-2">
+                        <span class="whitespace-nowrap font-medium text-slate-600">欄間距</span>
+                        <input type="range" min="1.0" max="4.0" step="0.2" v-model.number="copyColumnSpacing" class="w-full accent-emerald-600">
+                        <span class="w-8 font-mono text-right text-slate-500">{{ copyColumnSpacing }}</span>
+                    </div>
+
+                    <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center gap-2">
+                        <span class="whitespace-nowrap font-medium text-slate-600">字間距</span>
+                        <input type="range" min="0.8" max="2.8" step="0.1" v-model.number="copyLetterSpacing" class="w-full accent-emerald-600">
+                        <span class="w-8 font-mono text-right text-slate-500">{{ copyLetterSpacing }}</span>
+                    </div>
+
+                    <div class="bg-slate-50 p-1.5 rounded-xl border border-slate-200 flex items-center justify-between gap-1">
+                        <button @click="copyZhuyinMode = 'both'" 
+                                :class="copyZhuyinMode === 'both' ? 'bg-white shadow text-emerald-700 font-bold' : 'text-slate-600'" 
+                                class="flex-1 py-1 px-1.5 rounded-lg transition text-[11px]">
+                            顯示注音
+                        </button>
+                        <button @click="copyZhuyinMode = 'zhuyinOnly'" 
+                                :class="copyZhuyinMode === 'zhuyinOnly' ? 'bg-white shadow text-emerald-700 font-bold' : 'text-slate-600'" 
+                                class="flex-1 py-1 px-1.5 rounded-lg transition text-[11px]">
+                            只顯注音
+                        </button>
+                        <button @click="copyZhuyinMode = 'none'" 
+                                :class="copyZhuyinMode === 'none' ? 'bg-white shadow text-emerald-700 font-bold' : 'text-slate-600'" 
+                                class="flex-1 py-1 px-1.5 rounded-lg transition text-[11px]">
+                            隱藏注音
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Secondary Toggles -->
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-500 font-medium">排版方向：</span>
+                        <button @click="copyDirection = copyDirection === 'rl' ? 'lr' : 'rl'" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-300 font-medium">
+                            <i class="fa-solid fa-arrows-left-right text-slate-500 mr-1"></i>
+                            {{ copyDirection === 'rl' ? '由右往左 (傳統直書)' : '由左往右' }}
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-500 font-medium">序號格式：</span>
+                        <button @click="copyNumberStyle = copyNumberStyle === 'chinese' ? 'arabic' : 'chinese'" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-300 font-medium">
+                            {{ copyNumberStyle === 'chinese' ? '中文數字 (一、二)' : '阿拉伯數字 (1. 2.)' }}
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-500 font-medium">底圖主題：</span>
+                        <button @click="copyTheme = 'grid'" :class="{ 'ring-2 ring-emerald-600 font-bold': copyTheme === 'grid' }" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300">
+                            綠格稿紙
+                        </button>
+                        <button @click="copyTheme = 'blackboard'" :class="{ 'ring-2 ring-emerald-600 font-bold': copyTheme === 'blackboard' }" class="px-2.5 py-1 rounded-lg bg-emerald-900 text-emerald-100 border border-emerald-700">
+                            黑板/綠板
+                        </button>
+                        <button @click="copyTheme = 'white'" :class="{ 'ring-2 ring-emerald-600 font-bold': copyTheme === 'white' }" class="px-2.5 py-1 rounded-lg bg-white text-slate-800 border border-slate-300">
+                            現代白板
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hint note -->
+            <div class="text-xs text-slate-500 flex items-center justify-between px-1 no-print">
+                <span><i class="fa-solid fa-lightbulb text-amber-500 mr-1"></i>提示：阿拉伯數字已升級為縱橫數字（Tate-chu-yoko），正向直立顯示。點擊任何國字可修改注音。</span>
+            </div>
+
+            <!-- Main Vertical Grid Area (Chalkboard Projection View) -->
+            <div id="copyBoard" 
+                 :class="[
+                     'print-area rounded-2xl p-6 sm:p-8 overflow-x-auto min-h-[520px] shadow-sm transition-all relative flex',
+                     copyDirection === 'rl' ? 'justify-end' : 'justify-start',
+                     copyTheme === 'grid' ? 'theme-grid' : (copyTheme === 'blackboard' ? 'theme-blackboard' : 'theme-white')
+                 ]">
+                
+                <div :class="copyDirection === 'rl' ? 'writing-vertical-rl' : 'writing-vertical-lr'"
+                     class="h-full min-h-[460px] max-h-[720px] leading-relaxed select-text font-serif"
+                     :style="{ 
+                         fontSize: copyFontSize + 'px', 
+                         letterSpacing: copyLetterSpacing + 'em' 
+                     }">
+
+                    <!-- Column 1: Date & Header -->
+                    <div class="inline-block align-top h-full px-3 font-bold border-l border-r border-slate-300/40"
+                         :style="{ marginInlineEnd: (copyColumnSpacing * 10) + 'px' }">
+                        <div class="tracking-widest py-1">
+                            <template v-for="(tok, tIdx) in renderAnnotatedText(formattedRocDate(selectedDate))" :key="'date-' + tIdx">
+                                <span v-if="tok.isTateChuYoko" class="tate-chu-yoko">{{ tok.char }}</span>
+                                <ruby v-else-if="tok.isChinese && copyZhuyinMode !== 'none'" @click="openPolyphoneModal(tok)" class="cursor-pointer">
+                                    <span v-if="copyZhuyinMode !== 'zhuyinOnly'">{{ tok.char }}</span>
+                                    <rt>{{ tok.zhuyin }}</rt>
+                                </ruby>
+                                <span v-else>{{ tok.char }}</span>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Homework Items -->
+                    <div v-if="todayHomeworks.length === 0" class="inline-block align-top h-full px-6 opacity-60 font-medium">
+                        <span>(今日無作業或聯絡事項)</span>
+                    </div>
+
+                    <div v-else v-for="(hw, idx) in todayHomeworks" :key="hw.id" 
+                         class="inline-block align-top h-full px-3 border-l border-r border-slate-300/30 whitespace-normal"
+                         :style="{ marginInlineEnd: (copyColumnSpacing * 10) + 'px' }">
+                        
+                        <span class="font-bold opacity-90 inline">
+                            <template v-for="(tok, tIdx) in renderAnnotatedText(copyNumberStyle === 'chinese' ? toChineseNum(idx + 1) + '、' : (idx + 1) + '.')" :key="'num-' + hw.id + '-' + tIdx">
+                                <span v-if="tok.isTateChuYoko" class="tate-chu-yoko">{{ tok.char }}</span>
+                                <ruby v-else-if="tok.isChinese && copyZhuyinMode !== 'none'" @click="openPolyphoneModal(tok)" class="cursor-pointer">
+                                    <span v-if="copyZhuyinMode !== 'zhuyinOnly'">{{ tok.char }}</span>
+                                    <rt>{{ tok.zhuyin }}</rt>
+                                </ruby>
+                                <span v-else>{{ tok.char }}</span>
+                            </template>
+                            <span class="opacity-85">【{{ hw.category }}】</span>
+                        </span>
+
+                        <span class="font-medium tracking-wide inline">
+                            <template v-for="(tok, tIdx) in renderAnnotatedText(hw.title)" :key="'hw-' + hw.id + '-' + tIdx">
+                                <span v-if="tok.isTateChuYoko" class="tate-chu-yoko">{{ tok.char }}</span>
+                                <ruby v-else-if="tok.isChinese && copyZhuyinMode !== 'none'" @click="openPolyphoneModal(tok)" class="cursor-pointer hover:opacity-80">
+                                    <span v-if="copyZhuyinMode !== 'zhuyinOnly'">{{ tok.char }}</span>
+                                    <rt>{{ tok.zhuyin }}</rt>
+                                </ruby>
+                                <span v-else>{{ tok.char }}</span>
+                            </template>
+                        </span>
+
+                        <span v-if="hw.note" class="text-[0.85em] opacity-80 inline">
+                            <template v-for="(tok, tIdx) in renderAnnotatedText(' (' + hw.note + ')')" :key="'note-' + hw.id + '-' + tIdx">
+                                <span v-if="tok.isTateChuYoko" class="tate-chu-yoko">{{ tok.char }}</span>
+                                <ruby v-else-if="tok.isChinese && copyZhuyinMode !== 'none'" @click="openPolyphoneModal(tok)" class="cursor-pointer">
+                                    <span v-if="copyZhuyinMode !== 'zhuyinOnly'">{{ tok.char }}</span>
+                                    <rt>{{ tok.zhuyin }}</rt>
+                                </ruby>
+                                <span v-else>{{ tok.char }}</span>
+                            </template>
+                        </span>
+                    </div>
+
+                    <!-- Reminders / Notes Column -->
+                    <div v-if="dailyNotes[selectedDate]" 
+                         class="inline-block align-top h-full px-3 border-l border-r border-dashed border-amber-500/40 opacity-95"
+                         :style="{ marginInlineEnd: (copyColumnSpacing * 10) + 'px' }">
+                        <span class="font-bold text-[0.9em] text-amber-600/90 inline">提醒：</span>
+                        <span class="text-[0.85em] inline">
+                            <template v-for="(tok, tIdx) in renderAnnotatedText(dailyNotes[selectedDate])" :key="'dn-' + tIdx">
+                                <span v-if="tok.isTateChuYoko" class="tate-chu-yoko">{{ tok.char }}</span>
+                                <ruby v-else-if="tok.isChinese && copyZhuyinMode !== 'none'" @click="openPolyphoneModal(tok)" class="cursor-pointer">
+                                    <span v-if="copyZhuyinMode !== 'zhuyinOnly'">{{ tok.char }}</span>
+                                    <rt>{{ tok.zhuyin }}</rt>
+                                </ruby>
+                                <span v-else>{{ tok.char }}</span>
+                            </template>
+                        </span>
+                    </div>
+
+                    <!-- Signature Box Column -->
+                    <div class="inline-block align-top h-full px-2 py-1 border-2 border-slate-400/40 text-[0.75em] opacity-75 font-semibold"
+                         :style="{ marginInlineEnd: (copyColumnSpacing * 6) + 'px' }">
+                        <div class="h-full flex flex-col justify-between py-2">
+                            <div class="border border-current rounded px-1 py-4 text-center">導師簽章</div>
+                            <div class="border border-current rounded px-1 py-4 text-center">家長簽章</div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: CALENDAR & MONTHLY VIEW -->
+        <div v-if="currentTab === 'calendar'" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-calendar text-indigo-600"></i> {{ calendarYear }} 年 {{ calendarMonth + 1 }} 月
+                </h2>
+                <div class="flex gap-2">
+                    <button @click="prevMonth" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm text-slate-600 transition">
+                        <i class="fa-solid fa-chevron-left"></i> 上個月
+                    </button>
+                    <button @click="nextMonth" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm text-slate-600 transition">
+                        下個月 <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Calendar Grid Header -->
+            <div class="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
+                <div class="py-2 text-rose-500">日</div>
+                <div class="py-2">一</div>
+                <div class="py-2">二</div>
+                <div class="py-2">三</div>
+                <div class="py-2">四</div>
+                <div class="py-2">五</div>
+                <div class="py-2 text-indigo-500">六</div>
+            </div>
+
+            <!-- Calendar Days Grid -->
+            <div class="grid grid-cols-7 gap-1.5">
+                <div v-for="(day, idx) in calendarDays" :key="idx"
+                     @click="selectDateFromCalendar(day.dateStr)"
+                     :class="[
+                        'min-h-[85px] p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between',
+                        day.isCurrentMonth ? 'bg-white border-slate-200 hover:border-indigo-400' : 'bg-slate-50/50 border-slate-100 text-slate-300',
+                        day.dateStr === selectedDate ? 'ring-2 ring-indigo-600 bg-indigo-50/20' : '',
+                        day.isToday ? 'border-indigo-500 font-bold' : ''
+                     ]">
+                    <div class="flex justify-between items-center">
+                        <span :class="day.isToday ? 'bg-indigo-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-xs' : 'text-xs'">
+                            {{ day.dayNum }}
+                        </span>
+                        <span v-if="getHomeworkCountForDate(day.dateStr) > 0" 
+                              class="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full font-bold">
+                            {{ getHomeworkCountForDate(day.dateStr) }} 項
+                        </span>
+                    </div>
+
+                    <div class="space-y-0.5 mt-1 overflow-hidden max-h-[42px]">
+                        <div v-for="hw in getHomeworksForDate(day.dateStr).slice(0, 2)" :key="hw.id"
+                             class="text-[10px] truncate px-1 rounded bg-slate-100 text-slate-600 flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full" :class="hw.completed ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+                            {{ hw.title }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: TIMETABLE SETTINGS -->
+        <div v-if="currentTab === 'timetable'" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5 border-b pb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-table-cells text-indigo-600"></i> 每週固定課表編輯
+                    </h2>
+                    <p class="text-xs text-slate-500">修改後會自動套用到每日聯絡簿的課表顯示中。</p>
+                </div>
+                <button @click="saveData" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition shadow">
+                    <i class="fa-solid fa-floppy-disk mr-1"></i> 儲存課表
+                </button>
+            </div>
+
+            <!-- Timetable Grid Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-center border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-700">
+                            <th class="p-2 border border-slate-200 w-16">節次</th>
+                            <th class="p-2 border border-slate-200 w-24">時間</th>
+                            <th v-for="(dayName, dIdx) in weekDayNames" :key="dIdx" class="p-2 border border-slate-200">
+                                星期{{ dayName }}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(pTime, pIdx) in periods" :key="pIdx">
+                            <td class="p-2 border border-slate-200 font-bold bg-slate-50 text-slate-600">第 {{ pIdx + 1 }} 節</td>
+                            <td class="p-2 border border-slate-200 text-xs text-slate-400 bg-slate-50">{{ pTime }}</td>
+                            <td v-for="dIdx in 5" :key="dIdx" class="p-1 border border-slate-200">
+                                <input type="text" v-model="weeklyTimetable[dIdx - 1][pIdx]" @input="saveData"
+                                       placeholder="未填" 
+                                       class="w-full text-center py-1.5 px-1 rounded border-none focus:bg-indigo-50 focus:ring-1 focus:ring-indigo-500 text-slate-800 font-medium">
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 5: BACKUP & CLOUD SETTINGS -->
+        <div v-if="currentTab === 'backup'" class="space-y-5">
+            <!-- Google Drive Cloud Direct Sync Section -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-brands fa-google-drive text-emerald-600 text-xl"></i> Google 雲端硬碟直接同步
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            透過 Google 授權可以直接將聯絡簿資料儲存在您個人 Google Drive 的專屬檔案中，跨裝置隨時讀取。
+                        </p>
+                    </div>
+                    <span :class="gdriveConnected ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-slate-100 text-slate-600 border-slate-200'"
+                          class="px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5">
+                        <i class="fa-solid" :class="gdriveConnected ? 'fa-link text-emerald-600' : 'fa-link-slash'"></i>
+                        {{ gdriveConnected ? '已連線至 Google 雲端' : '未連線' }}
+                    </span>
+                </div>
+
+                <!-- Education Account Warning Notice -->
+                <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-600 text-base shrink-0 mt-0.5"></i>
+                    <div class="space-y-1">
+                        <p class="font-bold">教育帳號 (@edu.tw / @gsuite) 限制提示：</p>
+                        <p class="text-amber-800">
+                            學校發給的教育帳號通常被管理員封鎖建立 GCP 專案與第三方 OAuth 授權。<b>請改用個人 Gmail 帳號</b>前往申請 Client ID，並建議以個人帳號進行同步授權。
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Google OAuth Client ID setup & Action buttons -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <div class="flex-1">
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="block text-xs font-semibold text-slate-600">
+                                    Google OAuth Client ID
+                                </label>
+                                <button @click="showOauthHelpModal = true" class="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1">
+                                    <i class="fa-solid fa-circle-question"></i> 如何免費申請 Client ID？
+                                </button>
+                            </div>
+                            <input type="text" v-model="gdriveClientId" @change="saveClientId"
+                                   placeholder="例如：xxxxxx-xxx.apps.googleusercontent.com" 
+                                   class="w-full border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                        </div>
+                        <div class="sm:self-end">
+                            <button @click="connectGoogleDrive" 
+                                    class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow transition flex items-center justify-center gap-1.5">
+                                <i class="fa-brands fa-google"></i> {{ gdriveConnected ? '重新連線授權' : '登入 Google 帳號連線' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Sync Controls -->
+                    <div v-if="gdriveConnected" class="pt-2 border-t border-slate-200/80 flex flex-wrap gap-2">
+                        <button @click="syncToDrive" :disabled="isSyncing"
+                                class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow transition flex items-center gap-1.5 disabled:opacity-50">
+                            <i class="fa-solid" :class="isSyncing ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'"></i>
+                            {{ isSyncing ? '同步至 Google 雲端硬碟' : '立即同步至 Google 雲端硬碟' }}
+                        </button>
+
+                        <button @click="loadFromDrive" :disabled="isSyncing"
+                                class="bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 px-4 py-2 rounded-xl text-xs font-semibold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50">
+                            <i class="fa-solid fa-cloud-arrow-down text-indigo-600"></i> 從 Google 雲端硬碟讀取復原
+                        </button>
+
+                        <span v-if="lastSyncTime" class="text-xs text-slate-400 self-center ml-auto">
+                            上次同步：{{ lastSyncTime }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual File Backup Card -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+                    <i class="fa-solid fa-file-arrow-down text-indigo-600"></i> 單機檔案備份與匯出 (.json)
+                </h2>
+                <p class="text-xs text-slate-500 mb-4">
+                    除雲端同步外，您也可以隨時將資料下載為檔案手動保存或匯入。
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+                        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-file-export text-emerald-600"></i> 下載資料備份檔 (.json)
+                        </h3>
+                        <button @click="exportData" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-xs font-medium transition shadow">
+                            下載備份檔
+                        </button>
+                    </div>
+
+                    <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+                        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-file-import text-indigo-600"></i> 選擇備份檔復原
+                        </h3>
+                        <input type="file" ref="fileInput" @change="importData" accept=".json" class="hidden">
+                        <button @click="$refs.fileInput.click()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl text-xs font-medium transition shadow">
+                            選擇檔案匯入
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Embed Guide Card -->
+            <div class="bg-indigo-50 border border-indigo-200 p-5 rounded-2xl space-y-3 text-slate-700">
+                <h3 class="font-bold text-indigo-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-circle-info text-indigo-600"></i> 如何嵌入到 Google 協作平台 (Google Sites)？
+                </h3>
+                <ol class="list-decimal list-inside text-xs space-y-1.5 text-slate-600">
+                    <li>開啟您的 <b>Google 協作平台</b> 編輯頁面。</li>
+                    <li>在右側選單點擊 <b>「插入」</b> ➔ <b>「嵌入」</b>。</li>
+                    <li>切換至 <b>「嵌入程式碼」</b> 頁籤。</li>
+                    <li>把這個單一 HTML 檔案的完整程式碼全部複製並貼入，按下下一步並插入。</li>
+                    <li>調整網頁區塊寬度與高度即可完美運作！</li>
+                </ol>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal: Add Homework Item -->
+    <div v-if="showAddModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i> 新增功課或事項
+                </h3>
+                <button @click="showAddModal = false" class="text-slate-400 hover:text-slate-600">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">日期</label>
+                    <input type="date" v-model="newHomework.date" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">科目 / 類別</label>
+                    <select v-model="newHomework.category" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
+                        <option value="國語">國語</option>
+                        <option value="數學">數學</option>
+                        <option value="英文">英文</option>
+                        <option value="自然">自然</option>
+                        <option value="社會">社會</option>
+                        <option value="閱讀">閱讀</option>
+                        <option value="藝術">藝術</option>
+                        <option value="體育">體育</option>
+                        <option value="綜合">綜合</option>
+                        <option value="考試提醒">考試提醒</option>
+                        <option value="帶物品">帶物品</option>
+                        <option value="其它">其它</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">內容說明 *</label>
+                    <input type="text" v-model="newHomework.title" @keyup.enter="addHomework" placeholder="例如：國習第六課 p.32~35" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">補充備註 (選填)</label>
+                    <input type="text" v-model="newHomework.note" @keyup.enter="addHomework" placeholder="例如：注意生字筆順" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button @click="showAddModal = false" class="flex-1 border border-slate-200 text-slate-600 py-2 rounded-xl text-xs font-semibold hover:bg-slate-50 transition">
+                    取消
+                </button>
+                <button @click="addHomework" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl text-xs font-semibold shadow transition">
+                    儲存功課
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: OAuth Client ID Guide -->
+    <div v-if="showOauthHelpModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4 max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <i class="fa-brands fa-google text-emerald-600"></i> 免費申請 Google Client ID 步驟指南
+                </h3>
+                <button @click="showOauthHelpModal = false" class="text-slate-400 hover:text-slate-600 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3 text-xs text-slate-600 leading-relaxed">
+                <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-900 font-medium">
+                    ⚠️ 請使用<b>個人一般 Gmail 帳號</b>操作（學校 @edu.tw 教育帳號無權限開啟）。
+                </div>
+
+                <ol class="list-decimal list-inside space-y-2.5 font-medium">
+                    <li>
+                        開啟 <a href="https://console.cloud.google.com/" target="_blank" class="text-indigo-600 underline font-bold">Google Cloud Console</a> 並使用個人 Gmail 登入。
+                    </li>
+                    <li>
+                        點擊頂部建立<b>新專案</b>（名稱可填：<code class="bg-slate-100 px-1 py-0.5 rounded">ContactBook</code>）。
+                    </li>
+                    <li>
+                        左側選單進入 <b>「API 和服務」➔「程式庫」</b>，搜尋並<b>啟用「Google Drive API」</b>。
+                    </li>
+                    <li>
+                        進入 <b>「OAuth 同意畫面」</b>，選擇 <b>「外部 (External)」</b>，填寫應用程式名稱與您的 Email。
+                    </li>
+                    <li>
+                        進入 <b>「憑證 (Credentials)」➔「建立憑證」➔選「OAuth 用戶端 ID」</b>。
+                    </li>
+                    <li>
+                        應用程式類型選擇 <b>「Web 應用程式」</b>，並在<b>已授權的 JavaScript 來源</b>新增此網頁的網址（如：<code class="bg-slate-100 px-1 py-0.5 rounded">https://sites.google.com</code> 或目前的網址）。
+                    </li>
+                    <li>
+                        按下建立後，複製生成的 <b>「用戶端 ID (Client ID)」</b>（格式為 <code class="bg-slate-100 px-1 rounded">xxx.apps.googleusercontent.com</code>）並貼回系統中即可！
+                    </li>
+                </ol>
+            </div>
+
+            <div class="pt-2 border-t flex justify-end">
+                <button @click="showOauthHelpModal = false" class="bg-indigo-600 text-white px-5 py-2 rounded-xl text-xs font-semibold hover:bg-indigo-700 transition">
+                    我明白了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Edit Polyphone Zhuyin (多音字修正) -->
+    <div v-if="showPolyphoneModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-xs w-full p-5 shadow-xl space-y-4 text-slate-800">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-sm text-slate-800">修正注音：<span class="text-indigo-600 text-lg font-mono">{{ activeCharToken.char }}</span></h3>
+                <button @click="showPolyphoneModal = false" class="text-slate-400 hover:text-slate-600">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-slate-500 mb-1">輸入正確注音符號 (例如 ㄍㄨㄛˊ)</label>
+                <input type="text" v-model="customZhuyinInput" placeholder="例如：ㄌㄜˋ" 
+                       class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            </div>
+
+            <div class="flex gap-2 pt-1">
+                <button @click="showPolyphoneModal = false" class="flex-1 border border-slate-200 text-slate-600 py-1.5 rounded-xl text-xs font-medium">
+                    取消
+                </button>
+                <button @click="savePolyphoneOverride" class="flex-1 bg-emerald-600 text-white py-1.5 rounded-xl text-xs font-medium hover:bg-emerald-700 shadow">
+                    儲存修正
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div v-if="toastMessage" class="fixed bottom-5 right-5 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-lg text-sm flex items-center gap-2 z-50 animate-bounce">
+        <i class="fa-solid fa-circle-check text-emerald-400"></i> {{ toastMessage }}
+    </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, watch } = Vue;
+
+createApp({
+    setup() {
+        // Active tab
+        const currentTab = ref('daily');
+        
+        // Google Drive API State
+        const gdriveClientId = ref(localStorage.getItem('gdrive_client_id') || '');
+        const gdriveAccessToken = ref('');
+        const gdriveConnected = ref(false);
+        const isSyncing = ref(false);
+        const lastSyncTime = ref(localStorage.getItem('gdrive_last_sync') || '');
+
+        const saveClientId = () => {
+            localStorage.setItem('gdrive_client_id', gdriveClientId.value.trim());
+        };
+
+        // Connect to Google Drive using Google Identity Services (GIS)
+        const connectGoogleDrive = () => {
+            if (typeof google === 'undefined' || !google.accounts) {
+                showToast('Google API 載入中，請稍後再試');
+                return;
+            }
+            if (!gdriveClientId.value.trim()) {
+                showToast('請先輸入您的 Google Cloud OAuth Client ID');
+                return;
+            }
+
+            saveClientId();
+
+            try {
+                const client = google.accounts.oauth2.initTokenClient({
+                    client_id: gdriveClientId.value.trim(),
+                    scope: 'https://www.googleapis.com/auth/drive.file',
+                    callback: async (response) => {
+                        if (response.access_token) {
+                            gdriveAccessToken.value = response.access_token;
+                            gdriveConnected.value = true;
+                            showToast('已成功連線至 Google 雲端硬碟！');
+                            await syncToDrive();
+                        } else {
+                            showToast('Google 驗證授權失敗');
+                        }
+                    }
+                });
+                client.requestAccessToken();
+            } catch (err) {
+                console.error('Google Auth Error:', err);
+                showToast('請檢查 Client ID 格式是否正確');
+            }
+        };
+
+        // Save current homework & schedule data directly to user's Google Drive
+        const syncToDrive = async () => {
+            if (!gdriveAccessToken.value) {
+                showToast('請先登入連線 Google 雲端硬碟');
+                return;
+            }
+            isSyncing.value = true;
+            try {
+                const fileData = localStorage.getItem('kids_homework_data') || '{}';
+                const fileName = 'kids_homework_data.json';
+
+                // 1. Check if file already exists in user's Drive
+                const searchRes = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}' and trashed=false`,
+                    { headers: { Authorization: `Bearer ${gdriveAccessToken.value}` } }
+                );
+                const searchData = await searchRes.json();
+
+                let fileId = null;
+                if (searchData.files && searchData.files.length > 0) {
+                    fileId = searchData.files[0].id;
+                }
+
+                if (fileId) {
+                    // Update existing file
+                    await fetch(
+                        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+                        {
+                            method: 'PATCH',
+                            headers: {
+                                Authorization: `Bearer ${gdriveAccessToken.value}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: fileData
+                        }
+                    );
+                } else {
+                    // Create new file via multipart upload
+                    const metadata = { name: fileName, mimeType: 'application/json' };
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                    form.append('file', new Blob([fileData], { type: 'application/json' }));
+
+                    await fetch(
+                        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                        {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${gdriveAccessToken.value}` },
+                            body: form
+                        }
+                    );
+                }
+
+                const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                lastSyncTime.value = now;
+                localStorage.setItem('gdrive_last_sync', now);
+                showToast('已成功同步更新至 Google 雲端硬碟！');
+            } catch (err) {
+                console.error('Drive Sync Error:', err);
+                showToast('雲端同步失敗，請檢查網路或重新授權');
+            } finally {
+                isSyncing.value = false;
+            }
+        };
+
+        // Load and restore data directly from Google Drive
+        const loadFromDrive = async () => {
+            if (!gdriveAccessToken.value) {
+                showToast('請先登入連線 Google 雲端硬碟');
+                return;
+            }
+            isSyncing.value = true;
+            try {
+                const fileName = 'kids_homework_data.json';
+                const searchRes = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}' and trashed=false`,
+                    { headers: { Authorization: `Bearer ${gdriveAccessToken.value}` } }
+                );
+                const searchData = await searchRes.json();
+
+                if (searchData.files && searchData.files.length > 0) {
+                    const fileId = searchData.files[0].id;
+                    const contentRes = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+                        { headers: { Authorization: `Bearer ${gdriveAccessToken.value}` } }
+                    );
+                    const content = await contentRes.json();
+
+                    if (content.weeklyTimetable) weeklyTimetable.value = content.weeklyTimetable;
+                    if (content.homeworks) homeworks.value = content.homeworks;
+                    if (content.dailyNotes) dailyNotes.value = content.dailyNotes;
+                    if (content.customZhuyinMap) customZhuyinMap.value = content.customZhuyinMap;
+                    saveData();
+                    showToast('已成功從 Google 雲端硬碟讀取並復原資料！');
+                } else {
+                    showToast('您的 Google 雲端硬碟中尚無歷史備份檔');
+                }
+            } catch (err) {
+                console.error('Drive Load Error:', err);
+                showToast('讀取雲端檔案失敗');
+            } finally {
+                isSyncing.value = false;
+            }
+        };
+
+        // Date handling
+        const todayStr = new Date().toISOString().split('T')[0];
+        const selectedDate = ref(todayStr);
+
+        // Weekly overview state
+        const weekOffset = ref(0);
+
+        const currentWeekDays = computed(() => {
+            const now = new Date();
+            now.setDate(now.getDate() + weekOffset.value * 7);
+            
+            const dayOfWeek = now.getDay();
+            const distanceToMon = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+            const monday = new Date(now);
+            monday.setDate(now.getDate() + distanceToMon);
+
+            const days = [];
+            const dayNames = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(monday);
+                d.setDate(monday.getDate() + i);
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const date = String(d.getDate()).padStart(2, '0');
+                const dateStr = `${y}-${m}-${date}`;
+                const formattedMD = `${m}/${date}`;
+                
+                days.push({
+                    dateStr,
+                    formattedMD,
+                    dayName: dayNames[i],
+                    isToday: dateStr === todayStr
+                });
+            }
+            return days;
+        });
+
+        const weeklyDateRangeText = computed(() => {
+            if (currentWeekDays.value.length === 0) return '';
+            const start = currentWeekDays.value[0].formattedMD;
+            const end = currentWeekDays.value[6].formattedMD;
+            return `${start} ~ ${end}`;
+        });
+
+        const prevWeek = () => { weekOffset.value--; };
+        const nextWeek = () => { weekOffset.value++; };
+        const goToCurrentWeek = () => { weekOffset.value = 0; };
+
+        const selectDayAndGoDaily = (dateStr) => {
+            selectedDate.value = dateStr;
+            currentTab.value = 'daily';
+        };
+
+        // Copy Contact Book Controls State
+        const copyFontSize = ref(28);
+        const copyColumnSpacing = ref(2.2);
+        const copyLetterSpacing = ref(1.4);
+        const copyZhuyinMode = ref('both');
+        const copyDirection = ref('rl');
+        const copyNumberStyle = ref('chinese');
+        const copyTheme = ref('grid');
+        const customZhuyinMap = ref({});
+
+        const toChineseNum = (num) => {
+            const chineseNums = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五'];
+            return chineseNums[num - 1] || num;
+        };
+
+        // Polyphone Edit Modal
+        const showPolyphoneModal = ref(false);
+        const activeCharToken = ref({ char: '', zhuyin: '' });
+        const customZhuyinInput = ref('');
+
+        // Periods definition
+        const periods = ['08:40-09:20', '09:30-10:10', '10:30-11:10', '11:20-12:00', '13:30-14:10', '14:20-15:00', '15:10-15:50'];
+        const weekDayNames = ['一', '二', '三', '四', '五'];
+
+        // Default Timetable (5 days x 7 periods)
+        const weeklyTimetable = ref([
+            ['國語', '數學', '健康', '體育', '綜合', '美勞', '美勞'], // Mon
+            ['數學', '國語', '英文', '自然', '本土', '彈性', '彈性'], // Tue
+            ['國語', '自然', '數學', '體育', '', '', ''],             // Wed
+            ['國語', '英文', '社會', '數學', '綜合', '閱讀', '電腦'], // Thu
+            ['數學', '國語', '自然', '社會', '體育', '音樂', '彈性']  // Fri
+        ]);
+
+        // Homework items list
+        const homeworks = ref([
+            { id: 1, date: todayStr, category: '國語', title: '國習第六課 p.32~35', note: '注意生字筆順', completed: false },
+            { id: 2, date: todayStr, category: '數學', title: '數習第六單元 p.40~44', note: '', completed: true },
+            { id: 3, date: todayStr, category: '閱讀', title: '閱讀一本書', note: '寫下最喜歡的一句話', completed: false }
+        ]);
+
+        // Daily notes (Items to bring)
+        const dailyNotes = ref({
+            [todayStr]: '帶跳繩、水壺、回條簽名'
+        });
+
+        // Calendar state
+        const calendarYear = ref(new Date().getFullYear());
+        const calendarMonth = ref(new Date().getMonth());
+
+        // Modal state
+        const showAddModal = ref(false);
+        const showOauthHelpModal = ref(false);
+        const toastMessage = ref('');
+        const newHomework = ref({
+            date: todayStr,
+            category: '國語',
+            title: '',
+            note: ''
+        });
+
+        const formattedToday = computed(() => {
+            const d = new Date();
+            return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+        });
+
+        const selectedDateDisplay = computed(() => {
+            if (!selectedDate.value) return '';
+            const [y, m, d] = selectedDate.value.split('-');
+            return `${m} 月 ${d} 日`;
+        });
+
+        const formattedRocDate = (dateStr) => {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            const rocYear = d.getFullYear() - 1911;
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+            return `民國 ${rocYear} 年 ${m} 月 ${day} 日 星期${weekNames[d.getDay()]}`;
+        };
+
+        const todaySubjects = computed(() => {
+            const dateObj = new Date(selectedDate.value);
+            const dayOfWeek = dateObj.getDay();
+            if (dayOfWeek === 0 || dayOfWeek === 6) return [];
+            return weeklyTimetable.value[dayOfWeek - 1] || [];
+        });
+
+        const todayHomeworks = computed(() => {
+            return homeworks.value.filter(h => h.date === selectedDate.value);
+        });
+
+        const completedCount = computed(() => {
+            return todayHomeworks.value.filter(h => h.completed).length;
+        });
+
+        const progressPercentage = computed(() => {
+            if (todayHomeworks.value.length === 0) return 0;
+            return Math.round((completedCount.value / todayHomeworks.value.length) * 100);
+        });
+
+        // Calendar generation
+        const calendarDays = computed(() => {
+            const year = calendarYear.value;
+            const month = calendarMonth.value;
+            const firstDayOfMonth = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            const days = [];
+            const prevMonthDays = new Date(year, month, 0).getDate();
+            for (let i = firstDayOfMonth - 1; i >= 0; i--) {
+                const d = prevMonthDays - i;
+                const m = month === 0 ? 12 : month;
+                const y = month === 0 ? year - 1 : year;
+                const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                days.push({ dayNum: d, dateStr, isCurrentMonth: false });
+            }
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                days.push({
+                    dayNum: d,
+                    dateStr,
+                    isCurrentMonth: true,
+                    isToday: dateStr === todayStr
+                });
+            }
+
+            return days;
+        });
+
+        const pinyinInitialsMap = {
+            'b':'ㄅ','p':'ㄆ','m':'ㄇ','f':'ㄈ',
+            'd':'ㄉ','t':'ㄊ','n':'ㄋ','l':'ㄌ',
+            'g':'ㄍ','k':'ㄎ','h':'ㄏ',
+            'j':'ㄐ','q':'ㄑ','x':'ㄒ',
+            'zh':'ㄓ','ch':'ㄔ','sh':'ㄕ','r':'ㄖ',
+            'z':'ㄗ','c':'ㄘ','s':'ㄙ'
+        };
+
+        const fullZhuyinSyllables = {
+            'zhi':'ㄓ','chi':'ㄔ','shi':'ㄕ','ri':'ㄖ','zi':'ㄗ','ci':'ㄘ','si':'ㄙ',
+            'ju':'ㄐㄩ','qu':'ㄑㄩ','xu':'ㄒㄩ','yu':'ㄩ',
+            'jue':'ㄐㄩㄝ','que':'ㄑㄩㄝ','xue':'ㄐㄩㄝ','yue':'ㄩㄝ',
+            'juan':'ㄐㄩㄢ','quan':'ㄑㄩㄢ','xuan':'ㄒㄩㄢ','yuan':'ㄩㄢ',
+            'jun':'ㄐㄩㄣ','qun':'ㄑㄩㄣ','xun':'ㄒㄩㄣ','yun':'ㄩㄣ',
+            'yong':'ㄩㄥ','jiong':'ㄐㄩㄥ','qiong':'ㄑㄩㄥ','xiong':'ㄒㄩㄥ',
+            'yi':'ㄧ','ya':'ㄧㄚ','yao':'ㄧㄠ','ye':'ㄧㄝ','you':'ㄧㄡ','yan':'ㄧㄢ','yin':'ㄧㄣ','yang':'ㄧㄤ','ying':'ㄧㄥ',
+            'wu':'ㄨ','wa':'ㄨㄚ','wo':'ㄨㄛ','wai':'ㄨㄞ','wei':'ㄨㄟ','wan':'ㄨㄢ','wen':'ㄨㄣ','wang':'ㄨㄤ','weng':'ㄨㄥ',
+            'er':'ㄦ'
+        };
+
+        const pinyinFinalsMap = {
+            'a':'ㄚ','o':'ㄛ','e':'ㄜ','ai':'ㄞ','ei':'ㄟ','ao':'ㄠ','ou':'ㄡ',
+            'an':'ㄢ','en':'ㄣ','ang':'ㄤ','eng':'ㄥ','er':'ㄦ',
+            'i':'ㄧ','ia':'ㄧㄚ','io':'ㄧㄛ','ie':'ㄧㄝ','iao':'ㄧㄠ','iu':'ㄧㄡ','ian':'ㄧㄢ','in':'ㄧㄣ','iang':'ㄧㄤ','ing':'ㄧㄥ',
+            'u':'ㄨ','ua':'ㄨㄚ','uo':'ㄨㄛ','uai':'ㄨㄞ','ui':'ㄨㄟ','uan':'ㄨㄢ','un':'ㄨㄣ','uang':'ㄨㄤ','ong':'ㄨㄥ',
+            'v':'ㄩ','u':'ㄩ','ve':'ㄩㄝ','ue':'ㄩㄝ','van':'ㄩㄢ','vn':'ㄩㄣ','iong':'ㄩㄥ'
+        };
+
+        const tonesMap = { '1':'', '2':'ˊ', '3':'ˇ', '4':'ˋ', '5':'˙' };
+
+        const convertPinyinToZhuyin = (pStr) => {
+            if (!pStr) return '';
+            const match = pStr.match(/^([a-z]+)([1-5]?)$/i);
+            if (!match) return pStr;
+            const base = match[1].toLowerCase();
+            const toneNum = match[2] || '1';
+            const toneChar = tonesMap[toneNum] || '';
+
+            if (fullZhuyinSyllables[base]) {
+                return toneNum === '5' ? '˙' + fullZhuyinSyllables[base] : fullZhuyinSyllables[base] + toneChar;
+            }
+
+            let initial = '';
+            let final = base;
+
+            if (base.startsWith('zh') || base.startsWith('ch') || base.startsWith('sh')) {
+                initial = base.substring(0, 2);
+                final = base.substring(2);
+            } else if (pinyinInitialsMap[base[0]]) {
+                initial = base[0];
+                final = base.substring(1);
+            }
+
+            const zInit = pinyinInitialsMap[initial] || '';
+            const zFin = pinyinFinalsMap[final] || final;
+            const combined = zInit + zFin;
+
+            return toneNum === '5' ? '˙' + combined : combined + toneChar;
+        };
+
+        const renderAnnotatedText = (textStr) => {
+            if (!textStr) return [];
+            
+            const normalized = String(textStr)
+                .replace(/:/g, '：')
+                .replace(/~/g, '〜')
+                .replace(/-/g, '〜')
+                .replace(/\(/g, '（')
+                .replace(/\)/g, '）')
+                .replace(/!/g, '！')
+                .replace(/\?/g, '？');
+
+            const result = [];
+            let i = 0;
+            while (i < normalized.length) {
+                const ch = normalized[i];
+                
+                if (/[\u4e00-\u9fa5]/.test(ch)) {
+                    let zhuyin = '';
+                    if (customZhuyinMap.value[ch]) {
+                        zhuyin = customZhuyinMap.value[ch];
+                    } else if (typeof pinyinPro !== 'undefined' && pinyinPro.pinyin) {
+                        try {
+                            const pyList = pinyinPro.pinyin(ch, { toneType: 'num', type: 'array' });
+                            if (pyList && pyList[0]) {
+                                zhuyin = convertPinyinToZhuyin(pyList[0]);
+                            }
+                        } catch (e) {}
+                    }
+                    result.push({ char: ch, zhuyin, isChinese: true, isTateChuYoko: false });
+                    i++;
+                }
+                else if (/[0-9a-zA-Z\.]/.test(ch)) {
+                    let numStr = '';
+                    while (i < normalized.length && /[0-9a-zA-Z\.]/.test(normalized[i])) {
+                        numStr += normalized[i];
+                        i++;
+                    }
+                    result.push({ char: numStr, zhuyin: '', isChinese: false, isTateChuYoko: true });
+                }
+                else {
+                    result.push({ char: ch, zhuyin: '', isChinese: false, isTateChuYoko: false });
+                    i++;
+                }
+            }
+            return result;
+        };
+
+        // Polyphone modal methods
+        const openPolyphoneModal = (token) => {
+            activeCharToken.value = token;
+            customZhuyinInput.value = token.zhuyin;
+            showPolyphoneModal.value = true;
+        };
+
+        const savePolyphoneOverride = () => {
+            if (activeCharToken.value.char) {
+                customZhuyinMap.value[activeCharToken.value.char] = customZhuyinInput.value.trim();
+                saveData();
+                showToast(`已更新「${activeCharToken.value.char}」的注音為 ${customZhuyinInput.value}`);
+            }
+            showPolyphoneModal.value = false;
+        };
+
+        // Toggle Fullscreen mode
+        const toggleFullscreen = () => {
+            const board = document.getElementById('copyBoard');
+            if (!document.fullscreenElement) {
+                if (board.requestFullscreen) board.requestFullscreen();
+                else if (board.webkitRequestFullscreen) board.webkitRequestFullscreen();
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        };
+
+        const triggerPrint = () => {
+            window.print();
+        };
+
+        // Helper Methods
+        const isWeekend = (dateStr) => {
+            const day = new Date(dateStr).getDay();
+            return day === 0 || day === 6;
+        };
+
+        const getDayOfWeekName = (dateStr) => {
+            const names = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+            return names[new Date(dateStr).getDay()];
+        };
+
+        const getCategoryBadgeClass = (cat) => {
+            switch (cat) {
+                case '國語': return 'bg-rose-100 text-rose-700';
+                case '數學': return 'bg-blue-100 text-blue-700';
+                case '英文': return 'bg-amber-100 text-amber-700';
+                case '自然': return 'bg-emerald-100 text-emerald-700';
+                case '社會': return 'bg-purple-100 text-purple-700';
+                case '考試提醒': return 'bg-red-500 text-white';
+                default: return 'bg-slate-100 text-slate-700';
+            }
+        };
+
+        const goToToday = () => {
+            selectedDate.value = todayStr;
+        };
+
+        const onDateChange = () => {
+            newHomework.value.date = selectedDate.value;
+        };
+
+        const prevMonth = () => {
+            if (calendarMonth.value === 0) {
+                calendarMonth.value = 11;
+                calendarYear.value--;
+            } else {
+                calendarMonth.value--;
+            }
+        };
+
+        const nextMonth = () => {
+            if (calendarMonth.value === 11) {
+                calendarMonth.value = 0;
+                calendarYear.value++;
+            } else {
+                calendarMonth.value++;
+            }
+        };
+
+        const selectDateFromCalendar = (dateStr) => {
+            selectedDate.value = dateStr;
+            currentTab.value = 'daily';
+        };
+
+        const getHomeworksForDate = (dateStr) => {
+            return homeworks.value.filter(h => h.date === dateStr);
+        };
+
+        const getHomeworkCountForDate = (dateStr) => {
+            return getHomeworksForDate(dateStr).length;
+        };
+
+        const openAddHomeworkModal = () => {
+            newHomework.value.date = selectedDate.value;
+            showAddModal.value = true;
+        };
+
+        const addHomework = () => {
+            if (!newHomework.value.title.trim()) return;
+            homeworks.value.push({
+                id: Date.now(),
+                date: newHomework.value.date,
+                category: newHomework.value.category,
+                title: newHomework.value.title,
+                note: newHomework.value.note,
+                completed: false
+            });
+            newHomework.value.title = '';
+            newHomework.value.note = '';
+            showAddModal.value = false;
+            saveData();
+            showToast('已成功新增作業項目！');
+        };
+
+        const deleteHomework = (id) => {
+            homeworks.value = homeworks.value.filter(h => h.id !== id);
+            saveData();
+            showToast('已刪除該項目');
+        };
+
+        const copyLineFormat = () => {
+            const dayName = getDayOfWeekName(selectedDate.value);
+            let text = `【${selectedDateDisplay.value} (${dayName}) 聯絡簿】\n\n`;
+            
+            text += `📚 今日課表：\n`;
+            if (todaySubjects.value.length === 0) {
+                text += `無 (假日)\n`;
+            } else {
+                text += todaySubjects.value.map((s, i) => `${i + 1}.${s || '無'}`).join(' ') + '\n';
+            }
+
+            text += `\n✏️ 今日功課與事項：\n`;
+            if (todayHomeworks.value.length === 0) {
+                text += `無作業\n`;
+            } else {
+                todayHomeworks.value.forEach((h, i) => {
+                    text += `${i + 1}. [${h.category}] ${h.title}${h.note ? ' (' + h.note + ')' : ''}\n`;
+                });
+            }
+
+            if (dailyNotes.value[selectedDate.value]) {
+                text += `\n🎒 攜帶物品備忘：\n${dailyNotes.value[selectedDate.value]}\n`;
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            showToast('已複製 LINE 格式聯絡簿文字！');
+        };
+
+        const showToast = (msg) => {
+            toastMessage.value = msg;
+            setTimeout(() => {
+                toastMessage.value = '';
+            }, 2500);
+        };
+
+        const saveData = () => {
+            const data = {
+                weeklyTimetable: weeklyTimetable.value,
+                homeworks: homeworks.value,
+                dailyNotes: dailyNotes.value,
+                customZhuyinMap: customZhuyinMap.value,
+                copyFontSize: copyFontSize.value,
+                copyColumnSpacing: copyColumnSpacing.value,
+                copyLetterSpacing: copyLetterSpacing.value,
+                copyZhuyinMode: copyZhuyinMode.value,
+                copyDirection: copyDirection.value,
+                copyNumberStyle: copyNumberStyle.value,
+                copyTheme: copyTheme.value
+            };
+            localStorage.setItem('kids_homework_data', JSON.stringify(data));
+        };
+
+        const loadData = () => {
+            const saved = localStorage.getItem('kids_homework_data');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.weeklyTimetable) weeklyTimetable.value = parsed.weeklyTimetable;
+                    if (parsed.homeworks) homeworks.value = parsed.homeworks;
+                    if (parsed.dailyNotes) dailyNotes.value = parsed.dailyNotes;
+                    if (parsed.customZhuyinMap) customZhuyinMap.value = parsed.customZhuyinMap;
+                    if (parsed.copyFontSize) copyFontSize.value = parsed.copyFontSize;
+                    if (parsed.copyColumnSpacing) copyColumnSpacing.value = parsed.copyColumnSpacing;
+                    if (parsed.copyLetterSpacing) copyLetterSpacing.value = parsed.copyLetterSpacing;
+                    if (parsed.copyZhuyinMode) copyZhuyinMode.value = parsed.copyZhuyinMode;
+                    if (parsed.copyDirection) copyDirection.value = parsed.copyDirection;
+                    if (parsed.copyNumberStyle) copyNumberStyle.value = parsed.copyNumberStyle;
+                    if (parsed.copyTheme) copyTheme.value = parsed.copyTheme;
+                } catch (e) {
+                    console.error('Failed to parse local data', e);
+                }
+            }
+        };
+
+        const exportData = () => {
+            saveData();
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(localStorage.getItem('kids_homework_data'));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `聯絡簿備份_${todayStr}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+            showToast('備份檔已開始下載！可上傳至 Google Drive');
+        };
+
+        const importData = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (parsed.weeklyTimetable) weeklyTimetable.value = parsed.weeklyTimetable;
+                    if (parsed.homeworks) homeworks.value = parsed.homeworks;
+                    if (parsed.dailyNotes) dailyNotes.value = parsed.dailyNotes;
+                    if (parsed.customZhuyinMap) customZhuyinMap.value = parsed.customZhuyinMap;
+                    saveData();
+                    showToast('資料已順利復原！');
+                } catch (err) {
+                    alert('備份檔案格式不正確！');
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        onMounted(() => {
+            loadData();
+        });
+
+        watch([copyFontSize, copyColumnSpacing, copyLetterSpacing, copyZhuyinMode, copyDirection, copyNumberStyle, copyTheme], () => {
+            saveData();
+        });
+
+        return {
+            currentTab,
+            selectedDate,
+            formattedToday,
+            selectedDateDisplay,
+            formattedRocDate,
+            periods,
+            weekDayNames,
+            weeklyTimetable,
+            homeworks,
+            dailyNotes,
+            todaySubjects,
+            todayHomeworks,
+            completedCount,
+            progressPercentage,
+            calendarYear,
+            calendarMonth,
+            calendarDays,
+            showAddModal,
+            showOauthHelpModal,
+            toastMessage,
+            newHomework,
+            weekOffset,
+            currentWeekDays,
+            weeklyDateRangeText,
+            // Google Drive Sync Returns
+            gdriveClientId,
+            gdriveConnected,
+            isSyncing,
+            lastSyncTime,
+            saveClientId,
+            connectGoogleDrive,
+            syncToDrive,
+            loadFromDrive,
+            prevWeek,
+            nextWeek,
+            goToCurrentWeek,
+            selectDayAndGoDaily,
+            copyFontSize,
+            copyColumnSpacing,
+            copyLetterSpacing,
+            copyZhuyinMode,
+            copyDirection,
+            copyNumberStyle,
+            copyTheme,
+            toChineseNum,
+            showPolyphoneModal,
+            activeCharToken,
+            customZhuyinInput,
+            renderAnnotatedText,
+            openPolyphoneModal,
+            savePolyphoneOverride,
+            toggleFullscreen,
+            triggerPrint,
+            isWeekend,
+            getDayOfWeekName,
+            getCategoryBadgeClass,
+            goToToday,
+            onDateChange,
+            prevMonth,
+            nextMonth,
+            selectDateFromCalendar,
+            getHomeworksForDate,
+            getHomeworkCountForDate,
+            openAddHomeworkModal,
+            addHomework,
+            deleteHomework,
+            copyLineFormat,
+            saveData,
+            exportData,
+            importData
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
